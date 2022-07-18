@@ -1,0 +1,19 @@
+input:
+ - ['2', 0.8, {'vary': True, 'non-negative': False}]
+ - ['1', 0.2, {'vary': True, 'non-negative': False}]
+ - ['0', 0, {'vary': False, 'non-negative': False}]
+
+
+kinetic: [
+    1000,
+    27.8,
+    0.3,
+    250,
+    20
+]
+
+irf:
+ - ['center', 0.0001]
+ - ['width', 0.00005]
+ - ['d_center', 532]
+ - ['d_width', 100]
