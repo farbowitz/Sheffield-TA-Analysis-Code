@@ -40,7 +40,7 @@ from yaml import load
 l = logging.getLogger(__name__)
 stream_handler = logging.StreamHandler(sys.stdout)
 l.addHandler(stream_handler)
-l.setLevel(logging.INFO)
+logging.basicConfig(format='%(levelname)s: %(asctime)s %(message)s', level=logging.INFO)
 
 
 folder = "C:/Users/Daniel/Desktop/Programming/PBDBT-ITIC data/PBDB-T;ITIC/longtime TA/HDF5 data/"
@@ -54,6 +54,27 @@ os.chdir(folder)
 #IMPORTANT USER-DEFINED FUNCTIONS
 
 def find_nearest_index(array, number, direction=None): 
+    '''
+    
+    Parameters
+    ----------
+    array : numpy.array
+        1D array of floats or ints to find the desired value in.
+    number : float or int
+        The desired value, finds the index of closest member in the array.
+    direction : 'None', 'forward', or 'backward'
+       If 'None', will use absolute value and look both directions. Otherwise will take closest element above or below given value. The default is None.
+
+    Returns
+    -------
+    int
+        Index of the array element whose value is closest to input number. 
+
+    
+    
+    '''
+    
+    
     idx = None
     #addressing lists, pandas series, and similar
     try:
@@ -76,17 +97,35 @@ def find_nearest_index(array, number, direction=None):
     return idx
 
 def find_nearest_value(array, number, direction=None):
+    '''
+    
 
-  index = find_nearest_index(array, number, direction=direction)
-  #check vs data types
-  array = np.asarray(array)
+    Parameters
+    ----------
+    array : numpy.array
+        1D array of floats or ints to find the desired value in.
+    number : float or int
+        The desired value, finds closest member in the array.
+    direction : 'None', 'forward', or 'backward'
+       Will use findn_nearest_index assuming direction is None. The default is None.
 
-  return array[index]
+    Returns
+    -------
+    array element, preferably float or int
+        Element of the array (value) closest to input number. 
+
+    '''
+    
+    index = find_nearest_index(array, number, direction=direction)
+    #check vs data types
+    array = np.asarray(array)
+
+    return array[index]
 
 
 
 
-def mkdir(existing_folder, new_folder):
+def mkdir(existing_folder, new_folder):  
   if existing_folder[-1] != '/':
     existing_folder += '/'
   if new_folder[-1] != '/':
@@ -103,6 +142,15 @@ def get_sweep(spectrum_name):
 #adapted from HDF5 file converter, outputs various .Dtc (csv-type?) files in separate folders
 ##Originally by David Bossanyi (I think)
 def convert_hdf5_file(key, folder=folder):
+    
+        '''
+        Forms basis for loading hdf5 files in Dataset class. Calling this, the function can also save the converted dT/T data to .Dtc files.
+    
+    
+        adapted from HDF5 file converter, outputs various .Dtc (csv-type?) files in separate folders
+        Originally by David Bossanyi (I think)
+        '''
+
         fname = str(os.path.basename(os.path.normpath(key)))
         l.info('starting file <{0}>'.format(fname))
 
@@ -166,15 +214,21 @@ def convert_hdf5_file(key, folder=folder):
 
 class Dataset:
   '''
-  key: should refer to filepath for file to be used, init will automatically check for filetype
+  key: should refer to filepath for file to be used, init should automatically check for filetype/extension
+      Assumes .txt and .Dtc files use comma delimiters, i.e. treats them as .csv files
 
-  default type to convert to is 2D numpy array 
+
+  Default type init converts to is 2D numpy array, should also automatically produce same data as xarray. 
+      Assumes files outputs comma separated format with times in 1st row, spectra in 1st column, and the rest is corresponding dT/T or ΔA
   '''
   def __init__(self, key):
     self.key = key
     l.info('Loading data from {}'.format(key))
     self.data, self.metadata = self.route()
-    self.clean_data()
+    #self.clean_data()
+    self.times = self.data[0,1:]
+    self.spectra = self.data[1:,0]
+    self.values = self.data[1:,1:]
     self.xarray = self.array_to_xarray()
 
     #self.fluence = self.calculate_fluence()
@@ -208,6 +262,8 @@ class Dataset:
         g = f.get('Average')
         metadata['start'] = str(g.attrs['start date'])+' '+str(g.attrs['start time'])
         metadata['end'] = str(g.attrs['end_date'])+' '+str(g.attrs['end_time'])
+        #assume output for hdf5 is dT/T
+        metadata['output type'] = 'dT/T'
         return data, metadata 
     else:
       l.info('Not a hdf5 file. Check Dataset class methods.')
@@ -223,7 +279,7 @@ class Dataset:
       return None, None
 
   def plot_np_data(self):
-    values = self.data[1:,1:]
+    values = self.values
     plt.imshow(values)
     plt.show() 
 
@@ -319,7 +375,27 @@ class Dataset:
     return xarr
   
   def array_to_pandas(self):
-    pass
+    return pd.DataFrame(self.values, index=self.spectra, columns=self.times)
+
+  def plot_2D_heatmap(self, data, name, colormaps=cm.get_cmap('RdBu_r', 100)):
+    """
+    Helper function to plot data with associated colormap.
+    """
+    n = len(colormaps)
+    fig, axs = plt.subplots(1, n, figsize=(n * 2 + 2, 5),
+                            constrained_layout=True, squeeze=False)
+    for [ax, cmap] in zip(axs.flat, colormaps):
+        psm = ax.pcolormesh(data.index,np.log10(data.columns+6), data.T, cmap=cmap, rasterized=True)
+        fig.colorbar(psm, ax=ax)
+        ax.title.set_text(name)
+    plt.xlim(0.9,3.0)
+    yvals = np.asarray([-1, 0, 1, 5, 10, 50, 100, 500, 1000])
+    ylogs = np.around(np.log10(yvals + 6), 2)
+    plt.ylim(ylogs[0], ylogs[-1])
+    plt.yticks(ylogs, labels=yvals)
+    plt.xlabel('Energy(eV)')
+    plt.ylabel('Time (ps)')
+    plt.show()
 
 
 beam_reference_list = [-1444.799957, -1438.349957, -1431.899958, -1425.449958, -1418.999958, -1412.549958, -1406.099958, -1399.649959, -1393.199959, -1386.749959, -1380.299959, -1373.849959, -1367.39996, -1360.94996, -1354.49996, -1348.04996, -1341.59996, -1335.149961, -1328.699961, -1322.249961, -1315.799961, -1309.349961, -1302.899961, -1296.449962, -1289.999962, -1283.549962, -1277.099962, -1270.649962, -1264.199963, -1257.749963, -1251.299963, -1244.849963, -1238.399963, -1231.949964, -1225.499964, -1219.049964, -1212.599964, -1206.149964, -1199.699965, -1193.249965, -1186.799965, -1180.349965, -1173.899965, -1167.449965, -1160.999966, -1154.549966, -1148.099966, -1141.649966, -1135.199966, -1128.749967, -1122.299967, -1115.849967, -1109.399967, -1102.949967, -1096.499968, -1090.049968, -1083.599968, -1077.149968, -1070.699968, -1064.249969, -1057.799969, -1051.349969, -1044.899969, -1038.449969, -1031.999969, -1025.54997, -1019.09997, -1012.64997, -1006.19997, -999.74997, -993.299971, -986.849971, -980.399971, -973.949971, -967.499971, -961.049972, -954.599972, -948.149972, -941.699972, -935.249972, -928.799973, -922.349973, -915.899973, -909.449973, -902.999973, -896.549973, -890.099974, -883.649974, -877.199974, -870.749974, -864.299974, -857.849975, -851.399975, -844.949975, -838.499975, -832.049975, -825.599976, -819.149976, -812.699976, -806.249976, -799.799976, -793.349977, -786.899977, -780.449977, -773.999977, -767.549977, -761.099977, -754.649978, -748.199978, -741.749978, -735.299978, -728.849978, -722.399979, -715.949979, -709.499979, -703.049979, -696.599979, -690.14998, -683.69998, -677.24998, -670.79998, -664.34998, -657.899981, -651.449981, -644.999981, -638.549981, -632.099981, -625.649981, -619.199982, -612.749982, -606.299982, -599.849982, -593.399982, -586.949983, -580.499983, -574.049983, -567.599983, -561.149983, -554.699984, -548.249984, -541.799984, -535.349984, -528.899984, -522.449985, -515.999985, -509.549985, -503.099985, -496.649985, -490.199986, -483.749986, -477.299986, -470.849986, -464.399986, -457.949986, -451.499987, -445.049987, -438.599987, -432.149987, -425.699987, -419.249988, -412.799988, -406.349988, -399.899988, -393.449988, -386.999989, -380.549989, -374.099989, -367.649989, -361.199989, -354.74999, -348.29999, -341.84999, -335.39999, -328.94999, -322.49999, -316.049991, -309.599991, -303.149991, -296.699991, -290.249991, -283.799992, -277.349992, -270.899992, -264.449992, -257.999992, -251.549993, -245.099993, -238.649993, -232.199993, -225.749993, -219.299994, -212.849994, -206.399994, -199.949994, -193.499994, -187.049994, -180.599995, -174.149995, -167.699995, -161.249995, -154.799995, -148.349996, -141.899996, -135.449996, -128.999996, -122.549996, -116.099997, -109.649997, -103.199997, -96.749997, -90.299997, -83.849998, -77.399998, -70.949998, -64.499998, -58.049998, -51.599998, -45.149999, -38.699999, -32.249999, -25.799999, -19.349999, -12.9, -6.45, 0.0, 6.45, 12.9, 19.349999, 25.799999, 32.249999, 38.699999, 45.149999, 51.599998, 58.049998, 64.499998, 70.949998, 77.399998, 83.849998, 90.299997, 96.749997, 103.199997, 109.649997, 116.099997, 122.549996, 128.999996, 135.449996, 141.899996, 148.349996, 154.799995, 161.249995, 167.699995, 174.149995, 180.599995, 187.049994, 193.499994, 199.949994, 206.399994, 212.849994, 219.299994, 225.749993, 232.199993, 238.649993, 245.099993, 251.549993, 257.999992, 264.449992, 270.899992, 277.349992, 283.799992, 290.249991, 296.699991, 303.149991, 309.599991, 316.049991, 322.49999, 328.94999, 335.39999, 341.84999, 348.29999, 354.74999, 361.199989, 367.649989, 374.099989, 380.549989, 386.999989, 393.449988, 399.899988, 406.349988, 412.799988, 419.249988, 425.699987, 432.149987, 438.599987, 445.049987, 451.499987, 457.949986, 464.399986, 470.849986, 477.299986, 483.749986, 490.199986, 496.649985, 503.099985, 509.549985, 515.999985, 522.449985, 528.899984, 535.349984, 541.799984, 548.249984, 554.699984, 561.149983, 567.599983, 574.049983, 580.499983, 586.949983, 593.399982, 599.849982, 606.299982, 612.749982, 619.199982, 625.649981, 632.099981, 638.549981, 644.999981, 651.449981, 657.899981, 664.34998, 670.79998, 677.24998, 683.69998, 690.14998, 696.599979, 703.049979, 709.499979, 715.949979, 722.399979, 728.849978, 735.299978, 741.749978, 748.199978, 754.649978, 761.099977, 767.549977, 773.999977, 780.449977, 786.899977, 793.349977, 799.799976, 806.249976, 812.699976, 819.149976, 825.599976, 832.049975, 838.499975, 844.949975, 851.399975, 857.849975, 864.299974, 870.749974, 877.199974, 883.649974, 890.099974, 896.549973, 902.999973, 909.449973, 915.899973, 922.349973, 928.799973, 935.249972, 941.699972, 948.149972, 954.599972, 961.049972, 967.499971, 973.949971, 980.399971, 986.849971, 993.299971, 999.74997, 1006.19997, 1012.64997, 1019.09997, 1025.54997, 1031.999969, 1038.449969, 1044.899969, 1051.349969, 1057.799969, 1064.249969, 1070.699968, 1077.149968, 1083.599968, 1090.049968, 1096.499968, 1102.949967, 1109.399967, 1115.849967, 1122.299967, 1128.749967, 1135.199966, 1141.649966, 1148.099966, 1154.549966, 1160.999966, 1167.449965, 1173.899965, 1180.349965, 1186.799965, 1193.249965, 1199.699965, 1206.149964, 1212.599964, 1219.049964, 1225.499964, 1231.949964, 1238.399963, 1244.849963, 1251.299963, 1257.749963, 1264.199963, 1270.649962, 1277.099962, 1283.549962, 1289.999962, 1296.449962, 1302.899961, 1309.349961, 1315.799961, 1322.249961, 1328.699961, 1335.149961, 1341.59996, 1348.04996, 1354.49996, 1360.94996, 1367.39996, 1373.849959, 1380.299959, 1386.749959, 1393.199959, 1399.649959, 1406.099958, 1412.549958, 1418.999958, 1425.449958, 1431.899958, 1438.349957]
@@ -327,7 +403,7 @@ beam_stack = [beam_reference_list, [0]*len(beam_reference_list), beam_reference_
 beam_reference_df = pd.DataFrame(np.asarray(beam_stack).T, columns = ['Pos X [µm]', 'X Value [%]','Pos Y [µm]', 'Y Value [%]'])
 
 
-class Quantitites(Dataset):
+class Dataset_with_quantities(Dataset):
   def __init__(self, key) -> None:
      super().__init__(key)
      #self.import_beam_data('path')
@@ -595,8 +671,9 @@ from glotaran.project.scheme import Scheme
 
 test_filepath = 'C:/Users/Daniel/Desktop/Programming/PBDBT-ITIC data/PBDB-T;ITIC/longtime TA/HDF5 data/07-10_redo.hdf5'
 obj = Dataset(test_filepath)
-qs = Quantitites(test_filepath)
+qs = Dataset_with_quantities(test_filepath)
 print('Pump power: {} uW  Probe area: {} cm^2  Fluence: {} uJ/cm^2/pulse'.format(qs.pump_power, qs.probe_area, qs.fluence))
+print(qs.xarray)
 
 '''
 qs = Quantitites(test_filepath)
