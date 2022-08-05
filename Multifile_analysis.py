@@ -268,13 +268,10 @@ class MultiDataset():
                 setattr(self, var_type+'_units', var_unit)
         
 
-
-
     def create_individual_dataset_and_attributes(self, path):
         #check if default var_types 'time', 'spectral', and 'ΔA' as well as default var_units are listed.
-        obj = Dataset(path)
+        obj = Dataset_with_quantities(path)
         #check lengths agree
-        print(obj.ΔA_values)
        
         
         for var_type in self.variables:
@@ -288,18 +285,19 @@ class MultiDataset():
             elif hasattr(obj, var_type):
                 #i.e. should be listed as just var_type if value is singular
                 value = getattr(obj, var_type)               
-                setattr(self, temp_attr_name, value)
+                setattr(self, temp_attr_name, np.asarray(value))
             else:
                 l.warning('Cannot find attributes {} or {} in Dataset {}'.format(var_type, var_type_attr_name, path))
 
         #construct xarray from info
         not_ΔA = [var for var in self.variables if var != 'ΔA']
 
-        xar = xr.Dataset(data_vars={'': (not_ΔA,getattr(self, 'current_ΔA_values'))}, coords= {var_name:getattr(self, 'current_{}_values'.format(var_name)) for var_name in self.variables})
+        xar = xr.Dataset(data_vars={'ΔA': (['wavelength', 'time'],getattr(self, 'current_ΔA_values'))}, coords= {var_name:getattr(self, 'current_{}_values'.format(var_name)) for var_name in not_ΔA})
 
         return xar
         
-
+    def merge_arrays(self, paths):
+        return xr.merge([self.create_individual_dataset_and_attributes(path) for path in paths])
             
 
 
@@ -371,4 +369,5 @@ obj2 = Dataset_with_quantities(test_filepath2)
 obj3 = Dataset_with_quantities(test_filepath3)
 obj4 = Dataset_with_quantities(test_filepath4)
 '''
-print(MultiDataset([test_filepath2]).create_individual_dataset_and_attributes(test_filepath2))
+paths = [test_filepath1, test_filepath2]
+print(MultiDataset(paths).merge_arrays(paths))
