@@ -1,6 +1,3 @@
-
-
-
 ##anything time related?
 from datetime import datetime
 from datetime import timedelta
@@ -44,10 +41,10 @@ l.addHandler(stream_handler)
 
 folder = "C:/Users/Daniel/Desktop/Programming/PBDBT-ITIC data/PBDB-T;ITIC/longtime TA/HDF5 data/"
 all_files = glob.glob(os.path.join(folder, '*.hdf5'))
-Spec_data = {}
-Sorb_data = {}
-Irr_data = {}
-titles = []
+labeling_dict = {'01': ['Chlorobenzene', 'PBDB-T:ITIC'], '02': ['Chloroform', 'PBDB-T:ITIC'],'03': ['o-Xylene', 'PBDB-T:ITIC'],'04': ['CS₂/A', 'PBDB-T:ITIC'], '05': ['Chlorobenzene', 'PBDB-T Neat'], '06': ['Chloroform', 'PBDB-T Neat'],'07': ['o-Xylene', 'PBDB-T Neat'],'08': ['CS₂/A', 'PBDB-T Neat'],'09': ['Chlorobenzene', 'ITIC Neat'], '10': ['Chloroform', 'ITIC Neat'],'11': ['o-Xylene', 'ITIC Neat'],'12': ['CS₂/A', 'ITIC Neat']}
+
+
+
 os.chdir(folder)
 
 #IMPORTANT USER-DEFINED FUNCTIONS
@@ -163,37 +160,106 @@ def convert_hdf5_file(key, folder=folder):
         l.info('finished file <{0}>'.format(fname))
 
 
+
+#CLASSES
 class Dataset:
   '''
   key: should refer to filepath for file to be used, init will automatically check for filetype
 
   default type to convert to is 2D numpy array 
+
+  Note: One of the key assumptions for our data is that '.hdf5' files are long-time TA data (ns scale) using dT/T values, and other types ('.csv', '.txt', '.Dtc') are short-time, ultrafast TA data (ps scale) using ΔA values. If this is not the case, please adapt the Dataset functions accordingly. 
   '''
   def __init__(self, key):
     self.key = key
     l.info('Loading data from {}'.format(key))
     self.data, self.metadata = self.route()
+    #assign metadata values as class variables as well for easier access
+    for k, v in self.metadata.items():
+            k = k.replace(' ', '_')
+            setattr(self, k, v)
+    self.solvent, self.material = self.assign_names()
     #use these instead of self.data
-    self.times = self.data[0,1:]
-    self.spectra = self.data[1:, 0]
-    self.values = self.data[1:,1:]
-
+    self.time_values = self.data[0,1:]
+    self.wavelength_values = self.data[1:, 0]
+    self.ΔA_values = self.data[1:,1:]
+    self.assign_default_quantities()
     self.xarray = self.array_to_xarray()
     self.clean_data()
 
 
 
+  def assign_default_quantities(self, desired_value_type='ΔA', desired_spectral_units='nm'):
+    '''
+    Assumes data comes in 2D matrix format with first column being the spectra (default: wavelengths in nm) and the first row being the times (assigned based on file extension -- see route function in Dataset class)
+    
+    '''
+    file_type = self.key.split(sep='.')[-1].lower()
+    #hc in eV*nm
+    hc = 1239.81
+    if file_type == 'hdf5':
+      value_type = 'dT/T'
+      spectral_type = 'Wavelength'
+      spectral_units = 'nm'
+    elif file_type == ('csv'|'dtc'|'txt'):
+      value_type = 'ΔA'
+      spectral_type = 'Wavelength'
+      spectral_units = 'nm' 
+
+    #convert to energy, if desired
+    if desired_spectral_units.lower() == 'ev':
+      self.spectra = hc/self.spectra
+      spectral_type = 'Energy'
+      spectral_units = 'eV'
+
+    #convert to dT/T, if desired
+    if (desired_value_type.lower() in ['dt', 'dtt', 'dt/t', 'Δt', 'Δtt', 'Δt/t']) and (value_type == 'ΔA'):
+      self.ΔA_values = 10**(-self.ΔA_values)-1
+    
+    #convert to ΔA, if desired
+    elif (desired_value_type.lower() in ['da', 'δa']) and (value_type == 'dT/T'):
+      self.ΔA_values = -np.log10(self.ΔA_values+1)
+    
+
+
+    
+      
+
+
 
   def route(self):
-    key = self.key
+    key = self.key.lower()
     if key.endswith('.hdf5'):
       data, metadata = self.load_data_hdf5()
-    elif key.endswith('.csv' | '.Dtc' | '.txt'):
+      self.time_interval = 'long-time'
+      self.time_units = 'ns'
+    elif key.endswith('.csv' | '.dtc' | '.txt'):
       data, metadata = self.load_data_csv()
+      self.time_interval = 'ultrafast'
+      self.time_units = 'ps'
     else:
-      l.info('File type not valid. Check extension.')
+      l.warning('File type not valid. Check extension.')
       data, metadata = None, None
     return data, metadata
+
+  def assign_names(self):
+    key = os.path.basename(self.key).lower()
+    #this will be specific to however you label your data
+    if key.endswith('.hdf5'):
+      label_string = key.split(sep='-')[0]
+    elif key.endswith('.csv' | '.dtc' | '.txt'):
+      label_string = key.split(sep=' ')[0]
+    else:
+      l.warning('File type not valid. Cannot assign label.')
+      return None, None
+    try:
+      solvent, material = labeling_dict.get(label_string)
+      return solvent, material
+    except:
+      l.warning('{} not found in your labeling_dict. Check this against the assign_names function in Dataset class.'.format(label_string))
+      return None, None
+    
+    
 
   def load_data_hdf5(self):
     key = self.key
@@ -232,9 +298,12 @@ class Dataset:
     plt.colorbar()
     plt.show() 
 
+  ##DATA CLEANING FUNCTIONS
+ 
+ 
   def clean_data(self):
     self.remove_background_spectra()
-    #UP NEXT: Adjust for bad t0 measurement
+    #UP NEXT: Adjust for bad t0 measurement, manual?
     #self.check_for_nas()
 
   def remove_background_spectra(self, n_to_avg = 10):
@@ -272,9 +341,34 @@ class Dataset:
     #return as self.xarray
     self.xarray = xar
     
+  def characterize_background_noise(self):
+    xar = self.normalize_data()
+    #assume first 20 values (<-2ps/ns, depending) are just noise
+    region_to_avg = xar.isel(time=list(range(20)), spectral=list(range(len(xar['spectral']))))
+    x_values = region_to_avg.to_array().values.ravel()
+    #find mean and sd
+    sigma = np.std(x_values)
+    mu  = np.mean(x_values)
+    cap_max = mu+4*sigma
+    cap_min = mu-4*sigma
+    for i in range(len(xar['spectral'])):
+      t0 = 0
+      kinetic = xar.isel(time=list(range(len(xar['time']))), spectral=[i])
+      print(kinetic)
+      index_max = np.argmax(kinetic>cap_max)
+      index_min = np.argmin(kinetic<cap_min)
+      if index_max < index_min:
+        index = index_max
+      else:
+        index = index_min
+
+      t0 = xar['time'][index]
+      print(t0)
+
+
 
   def check_for_nas(self):
-    values = self.values
+    values = self.ΔA_values
     print(np.isnan(values).any())
 
   def extract_metadata(self, all_data):
@@ -299,34 +393,6 @@ class Dataset:
       self.values = data
       return data 
 
-  '''
-  DONE IN _with_quantities version
-  def calculate_fluence(self):
-    metadata = self.xarray.attrs
-    #check that metadata exists first
-    try:
-      power = metadata.get('pump power')
-      pump_wavelength = metadata.get('pump wavelength')
-    except:
-      l.info('Cannot find attributes "pump power" and "pump wavelength"')
-    #clean strings
-    pwr = float(power.replace('uW', ''))
-    p_wl = int(pump_wavelength.replace('nm', ''))
-    freq = 10000
-
-    #Energy per pulse
-    hc = 1.98644586*(10**(-10))
-    
-    OD = 0.4
-    beam_area = 3.1415926536*(0.01**2)
-    photon_E = hc/p_wl
-    photons_absorbed = 1 - (10**(-OD))
-    #Excitation Density
-    #return photons_absorbed*P*0.8/(f*photon_E*beam_area)
-    #E per pulse per area
-    return photons_absorbed*pwr/(freq*beam_area*photon_E)
-  '''
-
   def calculate_dispersion(self):
     for wl in self.xarray.spectral:
       #find max of spectrum
@@ -342,9 +408,9 @@ class Dataset:
   def array_to_xarray(self):
     #add in metadata?
     metadata = self.metadata
-    time = self.times
-    spectral = self.spectra
-    data_ = self.values.T
+    time = self.time_values
+    spectral = self.wavelength_values
+    data_ = self.ΔA_values.T
     xarr = xr.Dataset(data_vars={'data':(['time', 'spectral'],data_)}, coords= {'time':time, 'spectral':spectral}, attrs=metadata)
     #xarr = xr.DataArray(data_, dims=('time', 'spectral'), coords={'time':time, 'spectral':spectral}, attrs=metadata)
     #Removal of bad datapoint for my dataset
@@ -629,7 +695,8 @@ class Dataset_with_quantities(Dataset):
     #exciton density should also be -deltaA_GSB*avogadro's_number/(molar_absorbance_epsilon*thickness), as a check
 
     #fluence in uJ/(cm^2)/pulse
-    self.fluence = (self.beam_proportion*self.pump_power/self.probe_area)/self.laser_frequency
+    ##round to digit or sig figs?
+    self.fluence = np.around((self.beam_proportion*self.pump_power/self.probe_area)/self.laser_frequency, 1)
 
 
 
@@ -651,7 +718,8 @@ from glotaran.project.scheme import Scheme
 
 
 test_filepath = 'C:/Users/Daniel/Desktop/Programming/PBDBT-ITIC data/PBDB-T;ITIC/longtime TA/HDF5 data/07-50.hdf5'
-qs = Dataset(test_filepath)
+qs = Dataset_with_quantities(test_filepath)
+
 #print('Pump power: {} uW  Probe area: {} cm^2  Fluence: {} uJ/cm^2/pulse'.format(qs.pump_power, qs.probe_area, qs.fluence))
 
 
@@ -659,7 +727,8 @@ qs = Dataset(test_filepath)
 #probe_df, pump_df = qs.import_beam_data()
 #let's try working with pyglotaran again
 dataset = qs.xarray
-
+print(hasattr(qs, 'ΔA_values'))
+print(getattr(qs, 'ΔA_values'))
 #print(dataset)
 
 
