@@ -297,7 +297,11 @@ class MultiDataset():
         return xar
         
     def merge_arrays(self, paths):
-        return xr.merge([self.create_individual_dataset_and_attributes(path) for path in paths])
+        #work through dissimilar dimensions, fluence should be last (most open to varying per file)
+        #or when creating list, sort and combine based on unique properties
+        xar_list = [self.create_individual_dataset_and_attributes(path) for path in paths]
+        #confirm each has unique properties before attempting concat?
+        return xr.concat([self.create_individual_dataset_and_attributes(path) for path in paths], dim='fluence')
             
 
 
